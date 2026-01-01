@@ -150,6 +150,7 @@ socket.on("user-left", id => {
 let micEnabled = true;
 let camEnabled = false;
 let screenSharing = false;
+let screenStream = null;
 
 const micBtn = document.getElementById("mic");
 const camBtn = document.getElementById("cam");
@@ -164,63 +165,192 @@ function updateButtonState(btn, isActive) {
   }
 }
 
+function replaceTrackForAllPeers(newTrack, trackType) {
+  Object.values(peers).forEach(pc => {
+    const sender = pc.getSenders().find(s => s.track && s.track.kind === trackType);
+    if (sender) {
+      sender.replaceTrack(newTrack).catch(e => console.error("Error replacing track:", e));
+    }
+  });
+}
+
 micBtn.onclick = async () => {
-  if (!localStream) return;
+  if (!localStream) {
+    // First time enabling mic
+    try {
+      localStream = await getMedia();
+      localId = socket.id;
+      createVideo("me", localStream, true);
+      micEnabled = true;
+      updateButtonState(micBtn, false);
+    } catch (e) {
+      console.error("Error enabling mic:", e);
+    }
+    return;
+  }
+
   micEnabled = !micEnabled;
+  
+  // Toggle audio track
   localStream.getAudioTracks().forEach(track => {
     track.enabled = micEnabled;
   });
+
+  // Broadcast audio state change to all peers
+  Object.values(peers).forEach(pc => {
+    const audioSender = pc.getSenders().find(s => s.track && s.track.kind === "audio");
+    if (audioSender) {
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioSender.replaceTrack(audioTrack).catch(e => console.error("Error replacing audio:", e));
+      }
+    }
+  });
+
   updateButtonState(micBtn, !micEnabled);
   micBtn.querySelector(".label").textContent = micEnabled ? "Mute" : "Unmute";
 };
 
 camBtn.onclick = async () => {
-  if (camEnabled) {
-    camEnabled = false;
-    localStream.getVideoTracks().forEach(track => track.stop());
-    document.getElementById("me")?.remove();
-  } else {
-    camEnabled = true;
-    localStream = await getMedia(true);
-    document.getElementById("me")?.remove();
-    createVideo("me", localStream, true);
-    
-    Object.values(peers).forEach(pc => {
-      localStream.getTracks().forEach(track =>
-        pc.addTrack(track, localStream)
-      );
-    });
+  try {
+    if (camEnabled) {
+      // Turn off camera
+      camEnabled = false;
+      localStream.getVideoTracks().forEach(track => track.stop());
+      document.getElementById("me")?.remove();
+      updateButtonState(camBtn, false);
+      
+      // Send null/empty video track to peers
+      Object.values(peers).forEach(pc => {
+        const videoSender = pc.getSenders().find(s => s.track && s.track.kind === "video");
+        if (videoSender) {
+          videoSender.replaceTrack(null).catch(e => console.error("Error removing video:", e));
+        }
+      });
+    } else {
+      // Turn on camera - stop screenshare first if active
+      if (screenSharing) {
+        screenSharing = false;
+        screenStream?.getTracks().forEach(track => track.stop());
+        updateButtonState(screenBtn, false);
+      }
+
+      camEnabled = true;
+      const mediaStream = await getMedia(true);
+      
+      // Keep audio from original stream
+      const audioTrack = localStream.getAudioTracks()[0];
+      const videoTrack = mediaStream.getVideoTracks()[0];
+
+      // Stop previous video tracks
+      localStream.getVideoTracks().forEach(track => track.stop());
+
+      // Add new video track to local stream
+      if (audioTrack) {
+        mediaStream.removeTrack(audioTrack);
+      }
+      localStream.addTrack(videoTrack);
+
+      // Remove old video element and create new one
+      document.getElementById("me")?.remove();
+      createVideo("me", localStream, true);
+
+      // Broadcast video to all peers
+      Object.values(peers).forEach(pc => {
+        const videoSender = pc.getSenders().find(s => s.track && s.track.kind === "video");
+        if (videoSender) {
+          videoSender.replaceTrack(videoTrack).catch(e => console.error("Error replacing video:", e));
+        } else {
+          // If no sender exists, add new track
+          pc.addTrack(videoTrack, localStream);
+        }
+      });
+
+      updateButtonState(camBtn, true);
+    }
+  } catch (e) {
+    console.error("Error with camera:", e);
   }
-  updateButtonState(camBtn, camEnabled);
 };
 
 screenBtn.onclick = async () => {
   try {
     if (screenSharing) {
+      // Stop screenshare
       screenSharing = false;
+      screenStream?.getTracks().forEach(track => track.stop());
+      screenStream = null;
       updateButtonState(screenBtn, false);
-    } else {
-      const stream = await navigator.mediaDevices.getDisplayMedia();
-      screenSharing = true;
-      updateButtonState(screenBtn, true);
-      
+
+      // Remove screenshare video element
+      document.getElementById("me")?.remove();
+
+      // Send empty video track to peers
       Object.values(peers).forEach(pc => {
-        pc.addTrack(stream.getVideoTracks()[0], stream);
+        const videoSender = pc.getSenders().find(s => s.track && s.track.kind === "video");
+        if (videoSender) {
+          videoSender.replaceTrack(null).catch(e => console.error("Error removing video:", e));
+        }
       });
-      
-      stream.getVideoTracks()[0].onended = () => {
+    } else {
+      // Turn off camera first
+      if (camEnabled) {
+        camEnabled = false;
+        localStream.getVideoTracks().forEach(track => track.stop());
+        document.getElementById("me")?.remove();
+        updateButtonState(camBtn, false);
+      }
+
+      // Get screenshare
+      screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { cursor: "always" },
+        audio: false
+      });
+
+      screenSharing = true;
+      const screenTrack = screenStream.getVideoTracks()[0];
+
+      // Create video element for screenshare
+      createVideo("me", screenStream, true);
+
+      // Broadcast screenshare to all peers
+      Object.values(peers).forEach(pc => {
+        const videoSender = pc.getSenders().find(s => s.track && s.track.kind === "video");
+        if (videoSender) {
+          videoSender.replaceTrack(screenTrack).catch(e => console.error("Error replacing video:", e));
+        } else {
+          pc.addTrack(screenTrack, screenStream);
+        }
+      });
+
+      updateButtonState(screenBtn, true);
+
+      // When user stops screenshare from browser, clean up
+      screenTrack.onended = () => {
         screenSharing = false;
         updateButtonState(screenBtn, false);
+        document.getElementById("me")?.remove();
+
+        // Clear video from peers
+        Object.values(peers).forEach(pc => {
+          const videoSender = pc.getSenders().find(s => s.track && s.track.kind === "video");
+          if (videoSender) {
+            videoSender.replaceTrack(null).catch(e => console.error("Error removing video:", e));
+          }
+        });
       };
     }
   } catch (e) {
-    console.log("Screen share cancelled");
+    console.error("Screenshare error:", e);
   }
 };
 
 endCallBtn.onclick = () => {
   if (localStream) {
     localStream.getTracks().forEach(track => track.stop());
+  }
+  if (screenStream) {
+    screenStream.getTracks().forEach(track => track.stop());
   }
   Object.values(peers).forEach(pc => pc.close());
   location.reload();
