@@ -9,6 +9,7 @@ const usernameInput = document.getElementById("username-input");
 let localStream = null;
 let localId = null;
 let username = "You";
+let localVideoContainer = null; // Track the local video container
 const usernames = {};
 
 const config = {
@@ -21,9 +22,11 @@ socket.emit("join-room");
 usernameInput.addEventListener("input", (e) => {
   username = e.target.value || "You";
   // Update local username display
-  const meLabel = document.querySelector('#me')?.parentElement?.querySelector('.video-label');
-  if (meLabel) {
-    meLabel.textContent = username;
+  if (localVideoContainer) {
+    const label = localVideoContainer.querySelector('.video-label');
+    if (label) {
+      label.textContent = username;
+    }
   }
   // Broadcast username change to others
   socket.emit("username-change", username);
@@ -31,15 +34,22 @@ usernameInput.addEventListener("input", (e) => {
 
 socket.on("user-username", (id, name) => {
   usernames[id] = name;
-  const label = document.querySelector(`#${id}`)?.parentElement?.querySelector('.video-label');
-  if (label) {
-    label.textContent = name;
+  const video = document.querySelector(`#${id}`);
+  if (video) {
+    const container = video.closest('.video-container');
+    if (container) {
+      const label = container.querySelector('.video-label');
+      if (label) {
+        label.textContent = name;
+      }
+    }
   }
 });
 
 function createVideoContainer(id, stream, muted = false, name = "User") {
   const container = document.createElement("div");
   container.className = "video-container";
+  container.id = `container-${id}`;
 
   const videoWrapper = document.createElement("div");
   videoWrapper.className = "video-wrapper";
@@ -80,6 +90,22 @@ function createVideoContainer(id, stream, muted = false, name = "User") {
   container.appendChild(label);
 
   videos.appendChild(container);
+  
+  return container;
+}
+
+function updateLocalVideo(stream, name) {
+  if (!localVideoContainer) {
+    localVideoContainer = createVideoContainer("me", stream, true, name);
+  } else {
+    const video = localVideoContainer.querySelector('video');
+    video.srcObject = stream;
+    
+    const label = localVideoContainer.querySelector('.video-label');
+    if (label) {
+      label.textContent = name;
+    }
+  }
 }
 
 async function getMedia(video = false) {
@@ -107,9 +133,10 @@ socket.on("user-joined", async id => {
   if (!localStream) {
     localStream = await getMedia();
     localId = socket.id;
-    createVideoContainer("me", localStream, true, username);
+    localVideoContainer = createVideoContainer("me", localStream, true, username);
   }
 
+  // Add all local tracks to the peer connection
   localStream.getTracks().forEach(track =>
     pc.addTrack(track, localStream)
   );
@@ -124,7 +151,15 @@ socket.on("user-joined", async id => {
   pc.ontrack = e => {
     console.log("Received remote track from", id);
     const remoteUsername = usernames[id] || "User";
-    createVideoContainer(id, e.streams[0], false, remoteUsername);
+    // Check if we already have a container for this user
+    const existingContainer = document.querySelector(`#container-${id}`);
+    if (!existingContainer) {
+      createVideoContainer(id, e.streams[0], false, remoteUsername);
+    } else {
+      // Update existing container
+      const video = existingContainer.querySelector('video');
+      video.srcObject = e.streams[0];
+    }
   };
 
   const offer = await pc.createOffer();
@@ -141,7 +176,7 @@ socket.on("offer", async (offer, id) => {
   if (!localStream) {
     localStream = await getMedia();
     localId = socket.id;
-    createVideoContainer("me", localStream, true, username);
+    localVideoContainer = createVideoContainer("me", localStream, true, username);
   }
 
   localStream.getTracks().forEach(track =>
@@ -151,7 +186,15 @@ socket.on("offer", async (offer, id) => {
   pc.ontrack = e => {
     console.log("Received remote track from", id);
     const remoteUsername = usernames[id] || "User";
-    createVideoContainer(id, e.streams[0], false, remoteUsername);
+    // Check if we already have a container for this user
+    const existingContainer = document.querySelector(`#container-${id}`);
+    if (!existingContainer) {
+      createVideoContainer(id, e.streams[0], false, remoteUsername);
+    } else {
+      // Update existing container
+      const video = existingContainer.querySelector('video');
+      video.srcObject = e.streams[0];
+    }
   };
 
   pc.onicecandidate = e => {
@@ -193,7 +236,7 @@ socket.on("ice-candidate", async candidate => {
 });
 
 socket.on("user-left", id => {
-  const container = document.querySelector(`#${id}`)?.parentElement;
+  const container = document.querySelector(`#container-${id}`);
   container?.remove();
   peers[id]?.close();
   delete peers[id];
@@ -272,7 +315,6 @@ camBtn.onclick = async () => {
       // Turn off camera
       camEnabled = false;
       localStream.getVideoTracks().forEach(track => track.stop());
-      document.querySelector('#me')?.parentElement?.remove();
       updateButtonState(camBtn, false);
       
       // Send null/empty video track to peers
@@ -306,9 +348,8 @@ camBtn.onclick = async () => {
       }
       localStream.addTrack(videoTrack);
 
-      // Remove old video element and create new one
-      document.querySelector('#me')?.parentElement?.remove();
-      createVideoContainer("me", localStream, true, username);
+      // Update the local video container
+      updateLocalVideo(localStream, username);
 
       // Broadcast video to all peers
       Object.values(peers).forEach(pc => {
@@ -337,8 +378,8 @@ screenBtn.onclick = async () => {
       screenStream = null;
       updateButtonState(screenBtn, false);
 
-      // Remove screenshare video element
-      document.querySelector('#me')?.parentElement?.remove();
+      // Update local video display
+      updateLocalVideo(localStream, username);
 
       // Send empty video track to peers
       Object.values(peers).forEach(pc => {
@@ -352,7 +393,6 @@ screenBtn.onclick = async () => {
       if (camEnabled) {
         camEnabled = false;
         localStream.getVideoTracks().forEach(track => track.stop());
-        document.querySelector('#me')?.parentElement?.remove();
         updateButtonState(camBtn, false);
       }
 
@@ -365,8 +405,8 @@ screenBtn.onclick = async () => {
       screenSharing = true;
       const screenTrack = screenStream.getVideoTracks()[0];
 
-      // Create video element for screenshare
-      createVideoContainer("me", screenStream, true, `${username} (Screen)`);
+      // Update local video container with screenshare
+      updateLocalVideo(screenStream, `${username} (Screen)`);
 
       // Broadcast screenshare to all peers
       Object.values(peers).forEach(pc => {
@@ -384,7 +424,9 @@ screenBtn.onclick = async () => {
       screenTrack.onended = () => {
         screenSharing = false;
         updateButtonState(screenBtn, false);
-        document.querySelector('#me')?.parentElement?.remove();
+        
+        // Update local video to show nothing
+        updateLocalVideo(localStream, username);
 
         // Clear video from peers
         Object.values(peers).forEach(pc => {
