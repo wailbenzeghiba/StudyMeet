@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Study Meet</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>Study Meet</h1>
+  </header>
+
+  <div class="main-content">
+    <div id="videos" class="videos-grid"></div>
+    
+    <div class="chat-container">
+      <div class="chat-header">
+        <h3>Chat</h3>
+      </div>
+      <div id="messages" class="messages"></div>
+      <div class="chat-input-wrapper">
+        <input 
+          type="text" 
+          id="message-input" 
+          class="message-input" 
+          placeholder="Send a message..." 
+          autocomplete="off"
+        />
+        <button id="send-btn" class="send-btn" title="Send Message">
+          <span>➤</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="controls-wrapper">
+      <button id="mic" class="control-btn mic-btn" title="Toggle Microphone">
+        <span class="icon">🎤</span>
+        <span class="label">Mute</span>
+      </button>
+      <button id="cam" class="control-btn cam-btn" title="Toggle Camera">
+        <span class="icon">📷</span>
+        <span class="label">Camera</span>
+      </button>
+      <button id="screen" class="control-btn screen-btn" title="Share Screen">
+        <span class="icon">🖥</span>
+        <span class="label">Share</span>
+      </button>
+      <button id="end-call" class="control-btn end-btn" title="End Call">
+        <span class="icon">📞</span>
+        <span class="label">End</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
