@@ -6,6 +6,7 @@ const messageInput = document.getElementById("message-input");
 const sendBtn = document.getElementById("send-btn");
 
 let localStream = null;
+let localId = null;
 
 const config = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
@@ -20,22 +21,41 @@ function createVideo(id, stream, muted = false) {
   video.playsInline = true;
   video.muted = muted;
   video.id = id;
+  video.style.minHeight = "200px";
+  
+  // Ensure audio plays from remote streams
+  if (!muted) {
+    video.volume = 1;
+  }
+  
   videos.appendChild(video);
 }
 
 async function getMedia(video = false) {
-  return await navigator.mediaDevices.getUserMedia({
-    audio: true,
-    video
-  });
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      },
+      video: video ? { width: 1280, height: 720 } : false
+    });
+  } catch (error) {
+    console.error("Error accessing media:", error);
+    alert("Unable to access microphone/camera. Check permissions.");
+    throw error;
+  }
 }
 
 socket.on("user-joined", async id => {
+  console.log("User joined:", id);
   const pc = new RTCPeerConnection(config);
   peers[id] = pc;
 
   if (!localStream) {
     localStream = await getMedia();
+    localId = socket.id;
     createVideo("me", localStream, true);
   }
 
@@ -44,23 +64,31 @@ socket.on("user-joined", async id => {
   );
 
   pc.onicecandidate = e => {
-    if (e.candidate)
+    if (e.candidate) {
+      console.log("Sending ICE candidate to", id);
       socket.emit("ice-candidate", e.candidate, id);
+    }
   };
 
-  pc.ontrack = e => createVideo(id, e.streams[0]);
+  pc.ontrack = e => {
+    console.log("Received remote track from", id);
+    createVideo(id, e.streams[0]);
+  };
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
+  console.log("Sending offer to", id);
   socket.emit("offer", offer, id);
 });
 
 socket.on("offer", async (offer, id) => {
+  console.log("Received offer from", id);
   const pc = new RTCPeerConnection(config);
   peers[id] = pc;
 
   if (!localStream) {
     localStream = await getMedia();
+    localId = socket.id;
     createVideo("me", localStream, true);
   }
 
@@ -68,27 +96,47 @@ socket.on("offer", async (offer, id) => {
     pc.addTrack(track, localStream)
   );
 
-  pc.ontrack = e => createVideo(id, e.streams[0]);
-
-  pc.onicecandidate = e => {
-    if (e.candidate)
-      socket.emit("ice-candidate", e.candidate, id);
+  pc.ontrack = e => {
+    console.log("Received remote track from", id);
+    createVideo(id, e.streams[0]);
   };
 
-  await pc.setRemoteDescription(offer);
+  pc.onicecandidate = e => {
+    if (e.candidate) {
+      console.log("Sending ICE candidate to", id);
+      socket.emit("ice-candidate", e.candidate, id);
+    }
+  };
+
+  await pc.setRemoteDescription(new RTCSessionDescription(offer));
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
+  console.log("Sending answer to", id);
   socket.emit("answer", answer, id);
 });
 
 socket.on("answer", async answer => {
-  const pc = Object.values(peers)[0];
-  await pc.setRemoteDescription(answer);
+  // Find the correct peer connection by checking which one has a pending answer
+  for (const [id, pc] of Object.entries(peers)) {
+    if (pc.signalingState === "have-local-offer") {
+      console.log("Setting remote description (answer) for", id);
+      await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      break;
+    }
+  }
 });
 
 socket.on("ice-candidate", async candidate => {
-  const pc = Object.values(peers)[0];
-  await pc.addIceCandidate(candidate);
+  // Add ICE candidate to all peers (it will be filtered correctly)
+  for (const pc of Object.values(peers)) {
+    try {
+      if (pc.remoteDescription) {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      }
+    } catch (e) {
+      console.log("Error adding ICE candidate:", e);
+    }
+  }
 });
 
 socket.on("user-left", id => {
