@@ -28,6 +28,10 @@ io.on("connection", socket => {
     socket.to(to).emit("ice-candidate", candidate);
   });
 
+  socket.on("username-change", (name) => {
+    socket.to("room").emit("user-username", socket.id, name);
+  });
+
   socket.on("chat-message", (message) => {
     socket.to("room").emit("chat-message", message);
   });

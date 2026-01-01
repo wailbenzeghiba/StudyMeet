@@ -4,9 +4,12 @@ const videos = document.getElementById("videos");
 const messagesDiv = document.getElementById("messages");
 const messageInput = document.getElementById("message-input");
 const sendBtn = document.getElementById("send-btn");
+const usernameInput = document.getElementById("username-input");
 
 let localStream = null;
 let localId = null;
+let username = "You";
+const usernames = {};
 
 const config = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
@@ -14,7 +17,33 @@ const config = {
 
 socket.emit("join-room");
 
-function createVideo(id, stream, muted = false) {
+// Handle username changes
+usernameInput.addEventListener("input", (e) => {
+  username = e.target.value || "You";
+  // Update local username display
+  const meLabel = document.querySelector('#me')?.parentElement?.querySelector('.video-label');
+  if (meLabel) {
+    meLabel.textContent = username;
+  }
+  // Broadcast username change to others
+  socket.emit("username-change", username);
+});
+
+socket.on("user-username", (id, name) => {
+  usernames[id] = name;
+  const label = document.querySelector(`#${id}`)?.parentElement?.querySelector('.video-label');
+  if (label) {
+    label.textContent = name;
+  }
+});
+
+function createVideoContainer(id, stream, muted = false, name = "User") {
+  const container = document.createElement("div");
+  container.className = "video-container";
+
+  const videoWrapper = document.createElement("div");
+  videoWrapper.className = "video-wrapper";
+
   const video = document.createElement("video");
   video.srcObject = stream;
   video.autoplay = true;
@@ -22,13 +51,35 @@ function createVideo(id, stream, muted = false) {
   video.muted = muted;
   video.id = id;
   video.style.minHeight = "200px";
-  
-  // Ensure audio plays from remote streams
+
   if (!muted) {
     video.volume = 1;
   }
-  
-  videos.appendChild(video);
+
+  const fullscreenBtn = document.createElement("button");
+  fullscreenBtn.className = "fullscreen-btn";
+  fullscreenBtn.innerHTML = "⛶";
+  fullscreenBtn.title = "Fullscreen";
+  fullscreenBtn.onclick = (e) => {
+    e.stopPropagation();
+    if (video.requestFullscreen) {
+      video.requestFullscreen();
+    } else if (video.webkitRequestFullscreen) {
+      video.webkitRequestFullscreen();
+    }
+  };
+
+  videoWrapper.appendChild(video);
+  videoWrapper.appendChild(fullscreenBtn);
+
+  const label = document.createElement("div");
+  label.className = "video-label";
+  label.textContent = name;
+
+  container.appendChild(videoWrapper);
+  container.appendChild(label);
+
+  videos.appendChild(container);
 }
 
 async function getMedia(video = false) {
@@ -56,7 +107,7 @@ socket.on("user-joined", async id => {
   if (!localStream) {
     localStream = await getMedia();
     localId = socket.id;
-    createVideo("me", localStream, true);
+    createVideoContainer("me", localStream, true, username);
   }
 
   localStream.getTracks().forEach(track =>
@@ -72,7 +123,8 @@ socket.on("user-joined", async id => {
 
   pc.ontrack = e => {
     console.log("Received remote track from", id);
-    createVideo(id, e.streams[0]);
+    const remoteUsername = usernames[id] || "User";
+    createVideoContainer(id, e.streams[0], false, remoteUsername);
   };
 
   const offer = await pc.createOffer();
@@ -89,7 +141,7 @@ socket.on("offer", async (offer, id) => {
   if (!localStream) {
     localStream = await getMedia();
     localId = socket.id;
-    createVideo("me", localStream, true);
+    createVideoContainer("me", localStream, true, username);
   }
 
   localStream.getTracks().forEach(track =>
@@ -98,7 +150,8 @@ socket.on("offer", async (offer, id) => {
 
   pc.ontrack = e => {
     console.log("Received remote track from", id);
-    createVideo(id, e.streams[0]);
+    const remoteUsername = usernames[id] || "User";
+    createVideoContainer(id, e.streams[0], false, remoteUsername);
   };
 
   pc.onicecandidate = e => {
@@ -140,9 +193,11 @@ socket.on("ice-candidate", async candidate => {
 });
 
 socket.on("user-left", id => {
-  document.getElementById(id)?.remove();
+  const container = document.querySelector(`#${id}`)?.parentElement;
+  container?.remove();
   peers[id]?.close();
   delete peers[id];
+  delete usernames[id];
 });
 
 /* CONTROLS */
@@ -180,7 +235,7 @@ micBtn.onclick = async () => {
     try {
       localStream = await getMedia();
       localId = socket.id;
-      createVideo("me", localStream, true);
+      createVideoContainer("me", localStream, true, username);
       micEnabled = true;
       updateButtonState(micBtn, false);
     } catch (e) {
@@ -217,7 +272,7 @@ camBtn.onclick = async () => {
       // Turn off camera
       camEnabled = false;
       localStream.getVideoTracks().forEach(track => track.stop());
-      document.getElementById("me")?.remove();
+      document.querySelector('#me')?.parentElement?.remove();
       updateButtonState(camBtn, false);
       
       // Send null/empty video track to peers
@@ -252,8 +307,8 @@ camBtn.onclick = async () => {
       localStream.addTrack(videoTrack);
 
       // Remove old video element and create new one
-      document.getElementById("me")?.remove();
-      createVideo("me", localStream, true);
+      document.querySelector('#me')?.parentElement?.remove();
+      createVideoContainer("me", localStream, true, username);
 
       // Broadcast video to all peers
       Object.values(peers).forEach(pc => {
@@ -283,7 +338,7 @@ screenBtn.onclick = async () => {
       updateButtonState(screenBtn, false);
 
       // Remove screenshare video element
-      document.getElementById("me")?.remove();
+      document.querySelector('#me')?.parentElement?.remove();
 
       // Send empty video track to peers
       Object.values(peers).forEach(pc => {
@@ -297,7 +352,7 @@ screenBtn.onclick = async () => {
       if (camEnabled) {
         camEnabled = false;
         localStream.getVideoTracks().forEach(track => track.stop());
-        document.getElementById("me")?.remove();
+        document.querySelector('#me')?.parentElement?.remove();
         updateButtonState(camBtn, false);
       }
 
@@ -311,7 +366,7 @@ screenBtn.onclick = async () => {
       const screenTrack = screenStream.getVideoTracks()[0];
 
       // Create video element for screenshare
-      createVideo("me", screenStream, true);
+      createVideoContainer("me", screenStream, true, `${username} (Screen)`);
 
       // Broadcast screenshare to all peers
       Object.values(peers).forEach(pc => {
@@ -329,7 +384,7 @@ screenBtn.onclick = async () => {
       screenTrack.onended = () => {
         screenSharing = false;
         updateButtonState(screenBtn, false);
-        document.getElementById("me")?.remove();
+        document.querySelector('#me')?.parentElement?.remove();
 
         // Clear video from peers
         Object.values(peers).forEach(pc => {

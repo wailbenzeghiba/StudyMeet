@@ -20,10 +20,14 @@ body {
 }
 
 header {
-  padding: 16px 24px;
+  padding: 12px 24px;
   background: rgba(32, 33, 36, 0.95);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
 }
 
 header h1 {
@@ -31,6 +35,35 @@ header h1 {
   font-size: 24px;
   font-weight: 500;
   letter-spacing: 0.3px;
+  flex: 1;
+}
+
+.username-section {
+  display: flex;
+  align-items: center;
+}
+
+.username-input {
+  padding: 8px 12px;
+  background: rgba(60, 64, 67, 0.6);
+  border: 1px solid rgba(138, 180, 247, 0.3);
+  border-radius: 6px;
+  color: white;
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease;
+  min-width: 200px;
+}
+
+.username-input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.username-input:focus {
+  background: rgba(60, 64, 67, 0.8);
+  border-color: rgba(138, 180, 247, 0.6);
+  box-shadow: 0 0 0 2px rgba(138, 180, 247, 0.1);
 }
 
 .main-content {
@@ -50,6 +83,78 @@ header h1 {
   background: #202124;
   border-radius: 12px;
   padding: 0;
+}
+
+.video-container {
+  position: relative;
+  background: #0f0f10;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+}
+
+.video-container:hover {
+  transform: scale(1.02);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.6);
+}
+
+.video-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: black;
+}
+
+video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-label {
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.fullscreen-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 36px;
+  height: 36px;
+  background: rgba(60, 64, 67, 0.8);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.video-container:hover .fullscreen-btn {
+  display: flex;
+}
+
+.fullscreen-btn:hover {
+  background: #8ab4f7;
+  transform: scale(1.1);
+}
+
+.fullscreen-btn:active {
+  transform: scale(0.95);
 }
 
 .chat-container {
